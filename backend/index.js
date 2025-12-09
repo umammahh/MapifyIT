@@ -18,14 +18,32 @@ const allowedOrigins = [
 // Remove duplicates
 const uniqueOrigins = [...new Set(allowedOrigins)];
 
+// Helper function to check if origin is allowed
+const isOriginAllowed = (origin) => {
+  if (!origin) return true; // Allow requests with no origin
+  
+  // Check exact match
+  if (uniqueOrigins.indexOf(origin) !== -1) {
+    return true;
+  }
+  
+  // Allow all Vercel preview URLs (they all end with .vercel.app)
+  if (origin.endsWith('.vercel.app')) {
+    return true;
+  }
+  
+  // Allow all Netlify preview URLs
+  if (origin.includes('.netlify.app')) {
+    return true;
+  }
+  
+  return false;
+};
+
 // CORS middleware function
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    // Allow if origin is in the allowed list
-    if (uniqueOrigins.indexOf(origin) !== -1) {
+    if (isOriginAllowed(origin)) {
       callback(null, true);
     } else {
       // In production, be strict; in development, allow all
@@ -47,12 +65,18 @@ app.use(cors(corsOptions));
 // Additional CORS middleware for /data routes (static files)
 app.use('/data', (req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && (uniqueOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production')) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
+  
+  // Allow if origin is in allowed list, is a Vercel/Netlify URL, or in development
+  if (isOriginAllowed(origin) || process.env.NODE_ENV !== 'production') {
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
-  } else if (!origin || process.env.NODE_ENV !== 'production') {
+  } else {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   
