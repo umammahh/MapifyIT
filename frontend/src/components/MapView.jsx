@@ -52,10 +52,10 @@ const initialPOIs = [
   { name: "Centaurus Mall", coords: [33.7135, 73.0623], type: "Shopping" },
 ];
 
-// Data base URL (backend static /data). Default to localhost:5000.
+// Data base URL (backend static /data). Default to Render production backend.
 const DATA_BASE =
   import.meta.env.VITE_DATA_BASE_URL ||
-  "http://localhost:5000/data";
+  "https://mapify-it-task.onrender.com/data";
 
 // Mapbox Vector Tiles layer - Only visible when map view intersects Islamabad bounds
 function MapboxVectorLayer() {
