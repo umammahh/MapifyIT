@@ -6,22 +6,40 @@ const axios = require('axios');
 
 const app = express();
 
-// CORS configuration - allow frontend origin from environment variable
-const allowedOrigins = process.env.FRONTEND_URL 
-  ? [process.env.FRONTEND_URL]
-  : ['http://localhost:5173', 'http://localhost:3000']; // Default local dev origins
+// CORS configuration - allow frontend origins
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://mapify-it-task.vercel.app',
+  'https://mapify-it-task.netlify.app',
+  // Add custom frontend URL from environment variable if provided
+  ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [])
+];
+
+// Remove duplicates
+const uniqueOrigins = [...new Set(allowedOrigins)];
 
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+    
+    // Allow if origin is in the allowed list
+    if (uniqueOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // In development, allow all origins for easier testing
+      if (process.env.NODE_ENV !== 'production') {
+        callback(null, true);
+      } else {
+        console.warn(`CORS blocked origin: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
+      }
     }
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json());
@@ -32,7 +50,15 @@ console.log('Serving data from:', dataPath);
 console.log('Absolute path:', path.resolve(dataPath));
 
 app.use('/data', express.static(dataPath, {
-  setHeaders: (res, filePath) => {
+  setHeaders: (res, filePath, stat) => {
+    // Set CORS headers for all static files
+    const origin = res.req?.headers?.origin;
+    if (origin && uniqueOrigins.indexOf(origin) !== -1) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    
     if (filePath.endsWith('.geojson')) {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
     }
@@ -42,40 +68,63 @@ app.use('/data', express.static(dataPath, {
 // Explicit route handlers for GeoJSON files (fallback)
 app.get('/data/islamabad.geojson', (req, res) => {
   const filePath = path.join(dataPath, 'islamabad.geojson');
+  console.log('Requested file:', filePath);
+  console.log('File exists:', fs.existsSync(filePath));
+  
   if (fs.existsSync(filePath)) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
     res.sendFile(filePath);
   } else {
-    res.status(404).json({ error: 'File not found' });
+    console.error('File not found:', filePath);
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.status(404).json({ error: 'File not found', path: filePath });
   }
 });
 
 app.get('/data/rawPois.geojson', (req, res) => {
   const filePath = path.join(dataPath, 'rawPois.geojson');
+  console.log('Requested file:', filePath);
+  console.log('File exists:', fs.existsSync(filePath));
+  
   if (fs.existsSync(filePath)) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
     res.sendFile(filePath);
   } else {
-    res.status(404).json({ error: 'File not found' });
+    console.error('File not found:', filePath);
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.status(404).json({ error: 'File not found', path: filePath });
   }
 });
 
-app.get('/', (req, res) => res.json({ status: 'ok', message: 'MapifyIt backend' }));
+app.get('/', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.json({ 
+    status: 'ok', 
+    message: 'MapifyIt backend',
+    cors: 'enabled',
+    allowedOrigins: uniqueOrigins
+  });
+});
 
 // Test endpoint to verify data directory is accessible
 app.get('/test-data', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   const testDataPath = path.join(__dirname, 'data');
   try {
     const files = fs.readdirSync(testDataPath);
     res.json({ 
       dataPath: testDataPath, 
+      absolutePath: path.resolve(testDataPath),
       files,
       exists: fs.existsSync(testDataPath),
       islamabadExists: fs.existsSync(path.join(testDataPath, 'islamabad.geojson')),
       rawPoisExists: fs.existsSync(path.join(testDataPath, 'rawPois.geojson'))
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Test-data error:', error);
+    res.status(500).json({ error: error.message, stack: error.stack });
   }
 });
 
