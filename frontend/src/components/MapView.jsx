@@ -2,7 +2,13 @@ import React, { useEffect, useState } from "react";
 import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import axios from "axios";
+// Import leaflet.vectorgrid - this extends L.vectorGrid
+import "leaflet.vectorgrid";
+
+// Verify vectorgrid is loaded
+if (typeof window !== 'undefined') {
+  window.L = L; // Make sure L is global for vectorgrid
+}
 
 // Fix Leaflet marker icon issue in React
 delete L.Icon.Default.prototype._getIconUrl;
@@ -12,174 +18,352 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
 });
 
-// Vector Tile Layer Component
-// Using MapTiler vector tiles (free tier available at https://www.maptiler.com/)
-// For production: Get a free API key from MapTiler and replace the placeholder
-// Alternative: Install leaflet.vectorgrid for true vector tile support
-function VectorTileLayer() {
-  const map = useMap();
-  
-  useEffect(() => {
-    // Using MapTiler vector tiles - Get free API key from https://www.maptiler.com/cloud/
-    // Replace 'YOUR_MAPTILER_KEY' with your actual key, or use the demo key below
-    // For demo purposes, using a public demo key (limited requests)
-    const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY || "get_your_own_OpIi9ZULNHzrESv6T2vL";
-    
-    // MapTiler provides vector tiles as raster for Leaflet compatibility
-    // True vector tiles would require leaflet.vectorgrid package
-    const vectorTileLayer = L.tileLayer(
-      `https://api.maptiler.com/maps/openstreetmap/{z}/{x}/{y}.png?key=${MAPTILER_KEY}`,
-      {
-        attribution: '&copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 20,
-        tileSize: 256,
-      }
-    );
-    
-    vectorTileLayer.addTo(map);
-    
-    return () => {
-      map.removeLayer(vectorTileLayer);
-    };
-  }, [map]);
-  
-  return null;
-}
+// Islamabad bounding box (used for filtering data; map is not hard-clamped)
+const ISB_BOUNDS = [
+  [33.60, 73.00], // South-West
+  [33.75, 73.15], // North-East
+];
+const ISB_LATLNG_BOUNDS = L.latLngBounds(ISB_BOUNDS);
 
-// Islamabad Administrative Boundaries (F-Sectors)
-const islamabadBoundaries = {
+// Inline fallback boundary (in case remote fetch fails)
+const INLINE_BOUNDARY = {
   type: "FeatureCollection",
   features: [
     {
-      type: "Feature",
-      properties: { name: "F-6 Sector", type: "Administrative" },
-      geometry: {
-        type: "Polygon",
+  type: "Feature",
+      properties: { name: "Islamabad (fallback)" },
+  geometry: {
+    type: "Polygon",
         coordinates: [[
-          [73.050, 33.700], [73.065, 33.700], [73.065, 33.715], [73.050, 33.715], [73.050, 33.700]
-        ]],
-      },
-    },
-    {
-      type: "Feature",
-      properties: { name: "F-7 Sector", type: "Administrative" },
-      geometry: {
-        type: "Polygon",
-        coordinates: [[
-          [73.040, 33.690], [73.055, 33.690], [73.055, 33.705], [73.040, 33.705], [73.040, 33.690]
-        ]],
-      },
-    },
-    {
-      type: "Feature",
-      properties: { name: "F-8 Sector", type: "Administrative" },
-      geometry: {
-        type: "Polygon",
-        coordinates: [[
-          [73.041, 33.681], [73.054, 33.681], [73.054, 33.688], [73.041, 33.688], [73.041, 33.681]
-        ]],
-      },
-    },
-    {
-      type: "Feature",
-      properties: { name: "F-10 Sector", type: "Administrative" },
-      geometry: {
-        type: "Polygon",
-        coordinates: [[
-          [73.040, 33.680], [73.055, 33.680], [73.055, 33.695], [73.040, 33.695], [73.040, 33.680]
+          [72.90, 33.55],
+          [73.20, 33.55],
+          [73.20, 33.80],
+          [72.90, 33.80],
+          [72.90, 33.55],
         ]],
       },
     },
   ],
 };
 
-// Sample Roads (major roads in Islamabad)
-// Coordinates are in GeoJSON format: [longitude, latitude]
-// Islamabad bounds: ~33.60-33.75°N, 73.00-73.15°E
-const roads = {
-  type: "FeatureCollection",
-  features: [
-    {
-      type: "Feature",
-      properties: { name: "Jinnah Avenue", type: "Primary Road" },
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [73.030, 33.710],  // South end
-          [73.045, 33.700],  // Middle
-          [73.060, 33.690],  // North end
-        ],
-      },
-    },
-    {
-      type: "Feature",
-      properties: { name: "7th Avenue", type: "Primary Road" },
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [73.040, 33.710],  // South
-          [73.040, 33.700],  // Middle
-          [73.040, 33.690],  // North
-          [73.040, 33.680],  // Further north
-        ],
-      },
-    },
-    {
-      type: "Feature",
-      properties: { name: "Faisal Avenue", type: "Primary Road" },
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [73.050, 33.710],  // South
-          [73.050, 33.700],  // Middle
-          [73.050, 33.690],  // North
-        ],
-      },
-    },
-    {
-      type: "Feature",
-      properties: { name: "IJP Road", type: "Secondary Road" },
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [73.020, 33.700],
-          [73.035, 33.695],
-          [73.050, 33.690],
-        ],
-      },
-    },
-  ],
-};
-
-// Enhanced POIs for Islamabad
+// Fallback POIs (minimal) if remote fetch fails
 const initialPOIs = [
   { name: "F-8 Markaz", coords: [33.6844, 73.0479], type: "Commercial" },
-  { name: "F-10 Markaz", coords: [33.6900, 73.0450], type: "Commercial" },
   { name: "Centaurus Mall", coords: [33.7135, 73.0623], type: "Shopping" },
-  { name: "Pakistan Monument", coords: [33.6934, 73.0678], type: "Landmark" },
-  { name: "Faisal Mosque", coords: [33.7294, 73.0366], type: "Religious" },
-  { name: "Islamabad International Airport", coords: [33.6167, 73.0992], type: "Transport" },
-  { name: "Daman-e-Koh", coords: [33.7000, 73.0500], type: "Park" },
-  { name: "Lok Virsa Museum", coords: [33.6950, 73.0620], type: "Cultural" },
 ];
+
+// Data base URL (backend static /data). Default to localhost:5000.
+const DATA_BASE =
+  import.meta.env.VITE_DATA_BASE_URL ||
+  "http://localhost:5000/data";
+
+// Mapbox Vector Tiles layer - Only visible when map view intersects Islamabad bounds
+function MapboxVectorLayer() {
+  const map = useMap();
+
+  useEffect(() => {
+    // Check if leaflet.vectorgrid is available
+    if (typeof L === 'undefined' || !L.vectorGrid || !L.vectorGrid.protobuf) {
+      console.error("leaflet.vectorgrid is not loaded. Make sure it's imported.");
+      return;
+    }
+
+    const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.MAPBOX_TOKEN;
+    
+    if (!MAPBOX_TOKEN || MAPBOX_TOKEN === 'undefined') {
+      console.warn("MAPBOX_TOKEN not found. Vector tiles will not be displayed.");
+      return;
+    }
+
+    // Create vector tile layer with comprehensive styling
+    // Only load tiles that intersect with Islamabad bounds
+    const url = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/{z}/{x}/{y}.vector.pbf?access_token=${MAPBOX_TOKEN}`;
+
+    const vectorLayer = L.vectorGrid.protobuf(url, {
+      maxZoom: 20,
+      minZoom: 0,
+      interactive: true,
+      zIndex: 100, // Above base OSM tiles, below POIs/boundaries
+      getFeatureId: (f) => f.properties?.id || f.properties?.osm_id || null,
+      vectorTileLayerStyles: {
+        // Roads - gray lines
+        road: { 
+          weight: 1, 
+          color: "gray",
+          opacity: 0.7,
+          fill: false
+        },
+        // Administrative boundaries - blue lines with light blue fill
+        admin: { 
+          weight: 2, 
+          color: "blue", 
+          fill: true, 
+          fillColor: "lightblue",
+          fillOpacity: 0.3,
+          opacity: 0.8
+        },
+        // Water bodies
+        water: { 
+          fill: true, 
+          fillColor: "#a8d5e2", 
+          fillOpacity: 0.6, 
+          stroke: false 
+        },
+        // Land use areas
+        landuse: { 
+          fill: true, 
+          fillColor: "#f0f0f0", 
+          fillOpacity: 0.4, 
+          stroke: false 
+        },
+        // Parks and green spaces
+        park: { 
+          fill: true, 
+          fillColor: "#c8e6c9", 
+          fillOpacity: 0.5, 
+          stroke: true,
+          color: "#81c784",
+          weight: 1,
+          opacity: 0.6
+        },
+        // Transportation (fallback for road variations)
+        transportation: { 
+          color: "gray", 
+          weight: 1, 
+          opacity: 0.7,
+          fill: false
+        },
+        // Buildings
+        building: { 
+          fill: true, 
+          fillColor: "#d0d0d0", 
+          fillOpacity: 0.6, 
+          color: "#999999", 
+          weight: 0.5 
+        },
+        // Boundary (fallback for admin)
+        boundary: { 
+          color: "blue", 
+          weight: 2, 
+          opacity: 0.8,
+          fill: true,
+          fillColor: "lightblue",
+          fillOpacity: 0.3
+        },
+        // Places (labels background)
+        place: {
+          fill: false,
+          stroke: false
+        },
+        // Default style for any other layers
+        _default: { 
+          color: "#888888", 
+          weight: 1, 
+          opacity: 0.5, 
+          fill: false 
+        },
+      },
+    })
+    .on("click", (e) => {
+      const props = e.layer?.properties || {};
+      const name = props.name || props.amenity || "Feature";
+      L.popup()
+        .setLatLng(e.latlng)
+        .setContent(`<b>${name}</b>`)
+        .openOn(map);
+    });
+
+    // Function to check if map view is within or significantly overlaps Islamabad bounds
+    const isWithinIslamabad = () => {
+      const mapBounds = map.getBounds();
+      const center = map.getCenter();
+      
+      // Check if center is within Islamabad bounds
+      const centerInBounds = 
+        center.lat >= ISB_BOUNDS[0][0] && 
+        center.lat <= ISB_BOUNDS[1][0] &&
+        center.lng >= ISB_BOUNDS[0][1] && 
+        center.lng <= ISB_BOUNDS[1][1];
+      
+      // Also check if bounds intersect (for when zoomed out)
+      const boundsIntersect = mapBounds.intersects(ISB_LATLNG_BOUNDS);
+      
+      // Only show if center is in bounds OR if significantly overlapping
+      return centerInBounds || (boundsIntersect && map.getZoom() >= 11);
+    };
+
+    // Track if layer is added
+    let layerAdded = false;
+
+    // Function to update vector tile visibility
+    const updateVectorTileVisibility = () => {
+      const shouldShow = isWithinIslamabad();
+      
+      if (shouldShow) {
+        // Map view is within Islamabad - show vector tiles
+        if (!layerAdded) {
+          // Re-enable tile loading
+          vectorLayer._shouldLoadTile = undefined;
+          vectorLayer.addTo(map);
+          layerAdded = true;
+          console.log("Vector tiles enabled (Islamabad region visible)");
+        }
+      } else {
+        // Map view outside Islamabad - completely remove vector tiles
+        if (layerAdded) {
+          // Stop loading new tiles
+          vectorLayer._shouldLoadTile = () => false;
+          
+          // Remove all tiles
+          if (vectorLayer._tiles) {
+            Object.keys(vectorLayer._tiles).forEach(key => {
+              const tile = vectorLayer._tiles[key];
+              if (tile) {
+                if (tile.remove) tile.remove();
+                if (tile._container && tile._container.remove) {
+                  tile._container.remove();
+                }
+              }
+            });
+            vectorLayer._tiles = {};
+          }
+          
+          // Remove layer from map
+          map.removeLayer(vectorLayer);
+          layerAdded = false;
+          
+          // Clear any vector tile containers from DOM
+          const container = map.getContainer();
+          const vectorContainers = container.querySelectorAll('.leaflet-vectorgrid-tile-container');
+          vectorContainers.forEach(el => el.remove());
+          
+          // Force map redraw to clear any remaining tiles
+          map.invalidateSize();
+          console.log("Vector tiles disabled (outside Islamabad region)");
+        }
+      }
+    };
+
+    // Check on map move/zoom (use moveend for performance, but also check during move)
+    map.on("moveend zoomend load", updateVectorTileVisibility);
+    
+    // Also check during move for more responsive updates
+    map.on("move", updateVectorTileVisibility);
+    
+    // Initial check
+    updateVectorTileVisibility();
+
+    return () => {
+      map.off("moveend zoomend load move", updateVectorTileVisibility);
+      if (map.hasLayer(vectorLayer)) {
+        map.removeLayer(vectorLayer);
+      }
+    };
+  }, [map]);
+
+  return null;
+}
 
 export default function MapView() {
   const [pois, setPois] = useState(initialPOIs);
   const [loading, setLoading] = useState(false);
+  const [boundary, setBoundary] = useState(null);
 
-  // Fetch additional POIs from backend (optional)
+  // Fetch boundary (islamabad.geojson) from backend static /data
+  useEffect(() => {
+    const loadBoundary = async () => {
+      try {
+        // Try backend-served data first
+        const url = `${DATA_BASE}/islamabad.geojson`;
+        console.log('Loading boundary from:', url);
+        let res = await fetch(url);
+        
+        if (!res.ok) {
+          console.warn(`Failed to load from ${url}, status: ${res.status}`);
+          // Try relative (if served from public/)
+          res = await fetch("/data/islamabad.geojson");
+        }
+        
+        if (res.ok) {
+          const geo = await res.json();
+          console.log('Loaded boundary with', geo.features?.length || 0, 'features');
+          setBoundary(geo);
+          return;
+        }
+        
+        // Fallback to inline boundary
+        console.warn("Could not load Islamabad boundary from any source, using fallback");
+        setBoundary(INLINE_BOUNDARY);
+      } catch (e) {
+        console.error("Error loading Islamabad boundary:", e);
+        setBoundary(INLINE_BOUNDARY);
+      }
+    };
+    loadBoundary();
+  }, []);
+
+  // Fit map to boundary once loaded
+  useEffect(() => {
+    if (!boundary || !boundary.features?.length) return;
+    try {
+      const bounds = L.geoJSON(boundary).getBounds();
+      if (bounds.isValid()) {
+        // Use a small timeout to ensure map is ready
+        setTimeout(() => {
+          const map = window.leafletMapInstance;
+          if (map) map.fitBounds(bounds, { padding: [20, 20] });
+        }, 50);
+      }
+    } catch (e) {
+      console.warn("Could not fit to boundary", e);
+    }
+  }, [boundary]);
+
+  // Fetch POIs from rawPois.geojson in /data (no Overpass/API fallback)
   useEffect(() => {
     const fetchPOIs = async () => {
       try {
         setLoading(true);
-        // Try to fetch from backend, fallback to initial POIs
-        const response = await axios.get("http://localhost:5000/api/pois");
-        if (response.data && response.data.length > 0) {
-          setPois(response.data);
+        // Try local GeoJSON first
+        const url = `${DATA_BASE}/rawPois.geojson`;
+        console.log('Loading POIs from:', url);
+        let localRes = await fetch(url);
+        
+        if (!localRes.ok) {
+          console.warn(`Failed to load from ${url}, status: ${localRes.status}`);
+          localRes = await fetch("/data/rawPois.geojson");
         }
+        
+        if (localRes.ok) {
+          const geo = await localRes.json();
+          console.log('Loaded POI GeoJSON with', geo.features?.length || 0, 'features');
+          const parsed = (geo.features || [])
+            .map((f) => {
+              const [lon, lat] = f.geometry?.coordinates || [];
+              return {
+                name: f.properties?.name || f.properties?.amenity || "POI",
+                coords: [lat, lon],
+                type: f.properties?.amenity || f.properties?.category_group || "POI",
+              };
+            })
+            .filter((p) => p.coords[0] && p.coords[1])
+            .filter((p) =>
+              p.coords[0] >= ISB_BOUNDS[0][0] &&
+              p.coords[0] <= ISB_BOUNDS[1][0] &&
+              p.coords[1] >= ISB_BOUNDS[0][1] &&
+              p.coords[1] <= ISB_BOUNDS[1][1]
+            );
+          console.log('Parsed', parsed.length, 'POIs within Islamabad bounds');
+          setPois(parsed.length ? parsed.slice(0, 8000) : initialPOIs);
+          return;
+        }
+        
+        // Fallback to minimal POIs
+        console.warn("Could not load rawPois.geojson from any source, using default POIs");
+        setPois(initialPOIs);
       } catch (error) {
-        // Use initial POIs if backend is not available
-        console.log("Using default POIs");
+        console.error("Error loading POIs:", error);
+        setPois(initialPOIs);
       } finally {
         setLoading(false);
       }
@@ -189,21 +373,11 @@ export default function MapView() {
   }, []);
 
   // Style functions
-  const adminStyle = {
+  const boundaryStyle = {
     color: "#2563eb",
     weight: 2,
     opacity: 0.8,
-    fillColor: "#3b82f6",
-    fillOpacity: 0.1,
-  };
-
-  const roadStyle = (feature) => {
-    const roadType = feature.properties.type;
-    return {
-      color: roadType === "Primary Road" ? "#dc2626" : "#f59e0b",
-      weight: roadType === "Primary Road" ? 4 : 2,
-      opacity: 0.8,
-    };
+    fillOpacity: 0.05,
   };
 
   const getPOIIcon = (type) => {
@@ -228,37 +402,37 @@ export default function MapView() {
     <MapContainer
       center={[33.6844, 73.0479]}
       zoom={13}
+      minZoom={10}
+      maxZoom={19}
       style={{ height: "90vh", width: "100%" }}
       scrollWheelZoom={true}
+      whenCreated={(map) => {
+        // expose for fitBounds after boundary loads
+        window.leafletMapInstance = map;
+      }}
     >
-      {/* Vector Tile Layer - Primary base map */}
-      <VectorTileLayer />
-      
-      {/* Fallback raster tiles if vector tiles fail to load */}
+      {/* Base OSM raster tiles - background layer */}
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        opacity={0.3}
+        opacity={0.7}
         zIndex={0}
       />
-      
-      {/* Administrative Boundaries */}
-      <GeoJSON
-        data={islamabadBoundaries}
-        style={adminStyle}
-        onEachFeature={(feature, layer) => {
-          layer.bindPopup(`<b>${feature.properties.name}</b><br/>Type: ${feature.properties.type}`);
-        }}
-      />
 
-      {/* Roads Layer */}
-      <GeoJSON
-        data={roads}
-        style={roadStyle}
-        onEachFeature={(feature, layer) => {
-          layer.bindPopup(`<b>${feature.properties.name}</b><br/>Type: ${feature.properties.type}`);
-        }}
-      />
+      {/* Mapbox Vector Tiles - Overlay on top of base map */}
+      <MapboxVectorLayer />
+
+      {/* Islamabad Boundary */}
+      {boundary && (
+        <GeoJSON
+          data={boundary}
+          style={boundaryStyle}
+          onEachFeature={(feature, layer) => {
+            const name = feature.properties?.name || "Islamabad Region";
+            layer.bindPopup(`<b>${name}</b>`);
+          }}
+        />
+      )}
 
       {/* POI Markers */}
       {pois.map((poi, idx) => (
