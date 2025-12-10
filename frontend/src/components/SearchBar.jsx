@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 
-// Backend API base URL
-const API_BASE = import.meta.env.VITE_DATA_BASE_URL?.replace('/data', '') || 
-  "https://mapify-it-task.onrender.com";
+const getApiBase = () => 
+  import.meta.env.VITE_DATA_BASE_URL?.replace('/data', '') ||  "http://localhost:5000"||  "https://mapify-it-task.onrender.com";
 
 const SearchBar = ({ onSelectLocation, map }) => {
   const [query, setQuery] = useState("");
@@ -11,9 +10,15 @@ const SearchBar = ({ onSelectLocation, map }) => {
   const [showResults, setShowResults] = useState(false);
   const searchTimeoutRef = useRef(null);
   const resultsRef = useRef(null);
+  const abortControllerRef = useRef(null);
+  
+  const API_BASE = useMemo(() => getApiBase(), []);
 
-  // Debounced search function
-  const performSearch = async (searchQuery) => {
+  const performSearch = useCallback(async (searchQuery) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
     if (!searchQuery.trim()) {
       setResults([]);
       setIsSearching(false);
@@ -21,56 +26,64 @@ const SearchBar = ({ onSelectLocation, map }) => {
     }
 
     setIsSearching(true);
+    
+    // Create new abort controller for this request
+    abortControllerRef.current = new AbortController();
+    
     try {
-      const response = await fetch(`${API_BASE}/search?q=${encodeURIComponent(searchQuery)}`);
+      const response = await fetch(
+        `${API_BASE}/search?q=${encodeURIComponent(searchQuery)}`,
+        { signal: abortControllerRef.current.signal }
+      );
+      
       if (!response.ok) {
         throw new Error("Search failed");
       }
+      
       const data = await response.json();
       setResults(data.results || []);
     } catch (error) {
-      console.error("Search error:", error);
-      setResults([]);
+      // Ignore abort errors
+      if (error.name !== 'AbortError') {
+        console.error("Search error:", error);
+        setResults([]);
+      }
     } finally {
       setIsSearching(false);
+      abortControllerRef.current = null;
     }
-  };
+  }, [API_BASE]);
 
-  // Handle input change with debouncing
   useEffect(() => {
-    // Clear previous timeout
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
 
-    // Set new timeout for debounced search
     searchTimeoutRef.current = setTimeout(() => {
       if (query.trim()) {
         performSearch(query);
       } else {
         setResults([]);
+        setIsSearching(false);
       }
-    }, 300); // 300ms debounce delay
+    }, 300); 
 
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [query]);
+  }, [query, performSearch]);
 
-  // Handle result selection
-  const handleSelect = (result) => {
+  const handleSelect = useCallback((result) => {
     setQuery(result.name);
     setShowResults(false);
     if (onSelectLocation && result.coordinates) {
-      // coordinates are [lng, lat] from backend
       const [lng, lat] = result.coordinates;
       onSelectLocation([lat, lng], result);
     }
-  };
+  }, [onSelectLocation]);
 
-  // Handle click outside to close results
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (resultsRef.current && !resultsRef.current.contains(event.target)) {
@@ -132,7 +145,6 @@ const SearchBar = ({ onSelectLocation, map }) => {
         )}
       </div>
 
-      {/* Search Results Dropdown */}
       {showResults && results.length > 0 && (
         <div
           style={{
@@ -178,7 +190,6 @@ const SearchBar = ({ onSelectLocation, map }) => {
         </div>
       )}
 
-      {/* No results message */}
       {showResults && query.trim() && !isSearching && results.length === 0 && (
         <div
           style={{

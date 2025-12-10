@@ -7,33 +7,26 @@ const turf = require('@turf/turf');
 
 const app = express();
 
-// CORS configuration - allow frontend origins
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   'https://mapify-it-task.vercel.app',
-  // Add custom frontend URL from environment variable if provided
   ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [])
 ];
 
-// Remove duplicates
 const uniqueOrigins = [...new Set(allowedOrigins)];
 
-// Helper function to check if origin is allowed
 const isOriginAllowed = (origin) => {
-  if (!origin) return true; // Allow requests with no origin
+  if (!origin) return true; 
   
-  // Check exact match
   if (uniqueOrigins.indexOf(origin) !== -1) {
     return true;
   }
   
-  // Allow all Vercel preview URLs (they all end with .vercel.app)
   if (origin.endsWith('.vercel.app')) {
     return true;
   }
   
-  // Allow all Netlify preview URLs
   if (origin.includes('.netlify.app')) {
     return true;
   }
@@ -41,13 +34,11 @@ const isOriginAllowed = (origin) => {
   return false;
 };
 
-// CORS middleware function
 const corsOptions = {
   origin: function (origin, callback) {
     if (isOriginAllowed(origin)) {
       callback(null, true);
     } else {
-      // In production, be strict; in development, allow all
       if (process.env.NODE_ENV !== 'production') {
         callback(null, true);
       } else {
@@ -63,11 +54,9 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Additional CORS middleware for /data routes (static files)
 app.use('/data', (req, res, next) => {
   const origin = req.headers.origin;
   
-  // Allow if origin is in allowed list, is a Vercel/Netlify URL, or in development
   if (isOriginAllowed(origin) || process.env.NODE_ENV !== 'production') {
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
@@ -81,7 +70,6 @@ app.use('/data', (req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -90,22 +78,43 @@ app.use('/data', (req, res, next) => {
 
 app.use(express.json());
 
-// Data path - now pointing to backend/data folder
 const dataPath = path.join(__dirname, 'data');
 console.log('Serving data from:', dataPath);
 console.log('Absolute path:', path.resolve(dataPath));
 
-// Load enriched POIs for geocoding
 let enrichedPOIs = null;
 let poiCollection = null;
+let healthBuffers = null;
 try {
   const enrichedPOIsPath = path.join(dataPath, 'enrichedPois.geojson');
+  const rawPOIsPath = path.join(dataPath, 'rawPois.geojson');
+
   if (fs.existsSync(enrichedPOIsPath)) {
     enrichedPOIs = JSON.parse(fs.readFileSync(enrichedPOIsPath, 'utf8'));
     poiCollection = turf.featureCollection(enrichedPOIs.features);
-    console.log(`Loaded ${enrichedPOIs.features.length} enriched POIs for geocoding`);
+    console.log(`Loaded ${enrichedPOIs.features.length} enriched POIs for geocoding (enrichedPois.geojson)`);
+  } else if (fs.existsSync(rawPOIsPath)) {
+    enrichedPOIs = JSON.parse(fs.readFileSync(rawPOIsPath, 'utf8'));
+    poiCollection = turf.featureCollection(enrichedPOIs.features);
+    console.warn('Fallback: enrichedPois.geojson not found, using rawPois.geojson for geocoding');
   } else {
-    console.warn('enrichedPois.geojson not found, geocoding endpoints will not work');
+    console.warn('No POI data found (enrichedPois.geojson or rawPois.geojson), geocoding endpoints will not work');
+  }
+
+  if (poiCollection?.features?.length) {
+    const healthFeatures = poiCollection.features.filter(
+      (f) => (f.properties?.category || '').toLowerCase() === 'health'
+    );
+    if (healthFeatures.length) {
+      healthBuffers = turf.buffer(
+        turf.featureCollection(healthFeatures),
+        0.5, 
+        { units: 'kilometers' }
+      );
+      console.log(`Computed health buffers for ${healthFeatures.length} health POIs (500m)`);
+    } else {
+      console.warn('No health POIs found to buffer');
+    }
   }
 } catch (error) {
   console.error('Error loading enriched POIs:', error.message);
@@ -119,7 +128,6 @@ app.use('/data', express.static(dataPath, {
   }
 }));
 
-// Explicit route handlers for GeoJSON files (fallback)
 app.get('/data/islamabad.geojson', (req, res) => {
   const filePath = path.join(dataPath, 'islamabad.geojson');
   console.log('Requested file:', filePath);
@@ -162,7 +170,6 @@ app.get('/', (req, res) => {
   });
 });
 
-// Test endpoint to verify data directory is accessible
 app.get('/test-data', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   const testDataPath = path.join(__dirname, 'data');
@@ -182,136 +189,10 @@ app.get('/test-data', (req, res) => {
   }
 });
 
-// API endpoint to fetch POIs for Islamabad
-app.get('/api/pois', async (req, res) => {
-  try {
-    // Using Overpass API to fetch real POIs from OpenStreetMap
-    const overpassQuery = `
-      [out:json][timeout:25];
-      (
-        node["amenity"~"restaurant|cafe|hospital|school|bank|fuel"](33.65,73.0,33.75,73.15);
-        node["tourism"~"attraction|museum|hotel"](33.65,73.0,33.75,73.15);
-        node["shop"~"mall|supermarket"](33.65,73.0,33.75,73.15);
-      );
-      out body;
-    `;
-
-    const response = await axios.post('https://overpass-api.de/api/interpreter', overpassQuery, {
-      headers: { 'Content-Type': 'text/plain' }
-    });
-
-    const pois = response.data.elements
-      .filter(el => el.lat && el.lon)
-      .map(el => ({
-        name: el.tags?.name || el.tags?.amenity || el.tags?.tourism || 'Unnamed POI',
-        coords: [el.lat, el.lon],
-        type: el.tags?.amenity || el.tags?.tourism || el.tags?.shop || 'Other',
-      }))
-      .slice(0, 50); // Limit to 50 POIs
-
-    res.json(pois);
-  } catch (error) {
-    console.error('Error fetching POIs:', error.message);
-    // Return default POIs if Overpass API fails
-    res.json([
-      { name: "F-8 Markaz", coords: [33.6844, 73.0479], type: "Commercial" },
-      { name: "F-10 Markaz", coords: [33.6900, 73.0450], type: "Commercial" },
-      { name: "Centaurus Mall", coords: [33.7135, 73.0623], type: "Shopping" },
-      { name: "Pakistan Monument", coords: [33.6934, 73.0678], type: "Landmark" },
-      { name: "Faisal Mosque", coords: [33.7294, 73.0366], type: "Religious" },
-    ]);
-  }
-});
-
-// API endpoint to fetch roads for Islamabad
-app.get('/api/roads', async (req, res) => {
-  try {
-    const overpassQuery = `
-      [out:json][timeout:25];
-      (
-        way["highway"~"primary|secondary|tertiary"](33.65,73.0,33.75,73.15);
-      );
-      out geom;
-    `;
-
-    const response = await axios.post('https://overpass-api.de/api/interpreter', overpassQuery, {
-      headers: { 'Content-Type': 'text/plain' }
-    });
-
-    // Islamabad bounding box: 33.60-33.75°N, 73.00-73.15°E
-    const ISLAMABAD_BOUNDS = {
-      minLat: 33.60,
-      maxLat: 33.75,
-      minLon: 73.00,
-      maxLon: 73.15,
-    };
-
-    const roads = response.data.elements
-      .filter(el => el.geometry && el.geometry.length > 0)
-      .map(el => {
-        // Filter coordinates to only include those within Islamabad bounds
-        const validCoords = el.geometry
-          .map(coord => [coord.lon, coord.lat])
-          .filter(([lon, lat]) => 
-            lat >= ISLAMABAD_BOUNDS.minLat && 
-            lat <= ISLAMABAD_BOUNDS.maxLat &&
-            lon >= ISLAMABAD_BOUNDS.minLon && 
-            lon <= ISLAMABAD_BOUNDS.maxLon
-          );
-        
-        // Only include roads with at least 2 valid coordinates
-        if (validCoords.length < 2) return null;
-        
-        return {
-          type: "Feature",
-          properties: {
-            name: el.tags?.name || 'Unnamed Road',
-            type: el.tags?.highway || 'Road',
-          },
-          geometry: {
-            type: "LineString",
-            coordinates: validCoords,
-          },
-        };
-      })
-      .filter(road => road !== null); // Remove null entries
-
-    res.json({ type: "FeatureCollection", features: roads });
-  } catch (error) {
-    console.error('Error fetching roads:', error.message);
-    res.json({ type: "FeatureCollection", features: [] });
-  }
-});
-
-// API endpoint to fetch administrative boundaries
-app.get('/api/boundaries', async (req, res) => {
-  try {
-    const overpassQuery = `
-      [out:json][timeout:25];
-      (
-        relation["admin_level"="4"]["name"="Islamabad"](33.65,73.0,33.75,73.15);
-      );
-      out geom;
-    `;
-
-    const response = await axios.post('https://overpass-api.de/api/interpreter', overpassQuery, {
-      headers: { 'Content-Type': 'text/plain' }
-    });
-
-    // Process boundaries (simplified for demo)
-    res.json({ type: "FeatureCollection", features: [] });
-  } catch (error) {
-    console.error('Error fetching boundaries:', error.message);
-    res.json({ type: "FeatureCollection", features: [] });
-  }
-});
-
-// OSRM Routing API endpoint
 app.get('/route', async (req, res) => {
   try {
     const { start, end } = req.query;
 
-    // Validate required parameters
     if (!start || !end) {
       return res.status(400).json({ 
         error: "start and end parameters required",
@@ -319,11 +200,9 @@ app.get('/route', async (req, res) => {
       });
     }
 
-    // Parse coordinates
     const startCoords = start.split(",").map(coord => parseFloat(coord.trim()));
     const endCoords = end.split(",").map(coord => parseFloat(coord.trim()));
 
-    // Validate coordinate format
     if (startCoords.length !== 2 || endCoords.length !== 2 ||
         isNaN(startCoords[0]) || isNaN(startCoords[1]) ||
         isNaN(endCoords[0]) || isNaN(endCoords[1])) {
@@ -335,39 +214,35 @@ app.get('/route', async (req, res) => {
     const [startLat, startLng] = startCoords;
     const [endLat, endLng] = endCoords;
 
-    // OSRM expects LONGITUDE first, then LATITUDE
     const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
 
     console.log('Fetching route from OSRM:', osrmUrl);
     
     const response = await axios.get(osrmUrl);
 
-    // Check if route was found
     if (!response.data.routes || response.data.routes.length === 0) {
       return res.status(404).json({ 
         error: "No route found between the specified points"
       });
     }
 
-    // Format response to match the specified structure
     const route = response.data.routes[0];
     const waypoints = response.data.waypoints || [];
 
     res.json({
       route: {
-        distance: route.distance, // in meters
-        duration: route.duration, // in seconds
+        distance: route.distance, 
+        duration: route.duration, 
         geometry: route.geometry
       },
       waypoints: waypoints.map((wp, index) => ({
         name: index === 0 ? "Start Point" : index === waypoints.length - 1 ? "End Point" : `Waypoint ${index + 1}`,
-        location: wp.location // [lng, lat]
+        location: wp.location,
       }))
     });
   } catch (error) {
     console.error('Routing error:', error.message);
     
-    // Handle OSRM API errors
     if (error.response) {
       return res.status(error.response.status || 500).json({ 
         error: "Routing failed",
@@ -382,19 +257,16 @@ app.get('/route', async (req, res) => {
   }
 });
 
-// Geocoding API endpoints
-
-// Test endpoint to verify geocoding is available
 app.get('/api/geocoding/status', (req, res) => {
   res.json({
     status: 'ok',
     geocoding: 'enabled',
     poiDataLoaded: poiCollection !== null,
-    poiCount: poiCollection ? poiCollection.features.length : 0
+    poiCount: poiCollection ? poiCollection.features.length : 0,
+    healthBuffers: !!healthBuffers
   });
 });
 
-// Search geocoding: search POIs by name
 app.get('/search', (req, res) => {
   try {
     const q = req.query.q;
@@ -413,11 +285,11 @@ app.get('/search', (req, res) => {
         const name = f.properties?.name || f.properties?.name_clean || '';
         return name.toLowerCase().includes(searchQuery);
       })
-      .slice(0, 20) // Limit to 20 results
+      .slice(0, 20) 
       .map(f => ({
         name: f.properties?.name || f.properties?.name_clean || 'Unnamed',
         category: f.properties?.category_group || f.properties?.amenity || 'N/A',
-        coordinates: f.geometry.coordinates, // [lng, lat]
+        coordinates: f.geometry.coordinates, 
       }));
 
     res.json({ results });
@@ -427,7 +299,6 @@ app.get('/search', (req, res) => {
   }
 });
 
-// Reverse geocoding: lat,lng → nearest POI
 app.get('/reverse', (req, res) => {
   try {
     const { lat, lng } = req.query;
@@ -447,7 +318,6 @@ app.get('/reverse', (req, res) => {
       return res.status(400).json({ error: "Invalid lat/lng format" });
     }
 
-    // Create point from query coordinates
     const queryPoint = turf.point([lngNum, latNum]);
 
     let nearest = null;
@@ -468,12 +338,25 @@ app.get('/reverse', (req, res) => {
     res.json({
       name: nearest.properties?.name || nearest.properties?.name_clean || 'Unnamed',
       category: nearest.properties?.category_group || nearest.properties?.amenity || 'N/A',
-      coordinates: nearest.geometry.coordinates, // [lng, lat]
+      coordinates: nearest.geometry.coordinates, 
       distance_km: parseFloat(minDist.toFixed(2)),
     });
   } catch (error) {
     console.error('Reverse geocoding error:', error.message);
     res.status(500).json({ error: "Reverse geocoding failed", details: error.message });
+  }
+});
+
+app.get('/health-buffers', (req, res) => {
+  try {
+    if (healthBuffers) {
+      res.json(healthBuffers);
+    } else {
+      res.status(503).json({ error: 'Health buffers not available' });
+    }
+  } catch (error) {
+    console.error('Health buffers error:', error.message);
+    res.status(500).json({ error: 'Health buffers failed', details: error.message });
   }
 });
 
