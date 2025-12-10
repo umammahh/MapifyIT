@@ -249,6 +249,7 @@ export default function MapView() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [startInput, setStartInput] = useState("");
   const [endInput, setEndInput] = useState("");
+  const [clickAssignTarget, setClickAssignTarget] = useState(null); // 'start' | 'end' | null
 
   const API_BASE = useMemo(() =>
     import.meta.env.VITE_DATA_BASE_URL?.replace('/data', '') ||  "http://localhost:5000"  || "https://mapify-it-task.onrender.com",
@@ -424,6 +425,15 @@ export default function MapView() {
         const data = await response.json();
         console.log('[Reverse] data', data);
         handleReverseResult([lat, lng], data);
+
+        // If user chose to assign pin to start/end, populate the fields
+        if (clickAssignTarget === 'start') {
+          setStartInput(`${lat.toFixed(6)},${lng.toFixed(6)}`);
+          setClickAssignTarget('end'); // auto-switch to end for next click
+        } else if (clickAssignTarget === 'end') {
+          setEndInput(`${lat.toFixed(6)},${lng.toFixed(6)}`);
+          setClickAssignTarget(null); // done assigning
+        }
       } else {
         console.warn('[Reverse] failed status', response.status);
       }
@@ -432,7 +442,7 @@ export default function MapView() {
     } finally {
       reverseInFlightRef.current = false;
     }
-  }, [API_BASE, handleReverseResult]);
+  }, [API_BASE, handleReverseResult, clickAssignTarget]);
 
   // Parse "lat,lng" string
   const parseLatLng = (value) => {
@@ -536,9 +546,10 @@ export default function MapView() {
 
     return L.divIcon({
       className: "custom-poi-icon",
-      html: `<div style="background-color: ${color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-      iconSize: [12, 12],
-      iconAnchor: [6, 6],
+      // very small dot, no border/shadow
+      html: `<div style="background-color: ${color}; width: 8px; height: 8px; border-radius: 50%;"></div>`,
+      iconSize: [6, 6],
+      iconAnchor: [3, 3],
     });
   }, []);
 
@@ -742,7 +753,38 @@ export default function MapView() {
           }}
         />
 
-       
+        <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+          <button
+            onClick={() => setClickAssignTarget('start')}
+            style={{
+              flex: 1,
+              padding: "8px",
+              background: clickAssignTarget === 'start' ? "#1d4ed8" : "#2563eb",
+              color: "white",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "13px"
+            }}
+          >
+            Set Start by Pin
+          </button>
+          <button
+            onClick={() => setClickAssignTarget('end')}
+            style={{
+              flex: 1,
+              padding: "8px",
+              background: clickAssignTarget === 'end' ? "#047857" : "#10b981",
+              color: "white",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "13px"
+            }}
+          >
+            Set End by Pin
+          </button>
+        </div>
 
         <button
           onClick={() => fetchRoute(startInput, endInput)}
@@ -775,13 +817,13 @@ export default function MapView() {
         map={window.leafletMapInstance}
       />
       
-      <MapContainer
-        center={[33.6844, 73.0479]}
-        zoom={13}
-        minZoom={10}
-        maxZoom={19}
+    <MapContainer
+      center={[33.6844, 73.0479]}
+      zoom={13}
+      minZoom={10}
+      maxZoom={19}
         style={{ height: "100%", width: "100%" }}
-        scrollWheelZoom={true}
+      scrollWheelZoom={true}
         eventHandlers={{
           click: (e) => {
             const { lat, lng } = e.latlng;
@@ -789,11 +831,11 @@ export default function MapView() {
             triggerReverseGeocode(lat, lng);
           }
         }}
-        whenCreated={(map) => {
-          window.leafletMapInstance = map;
+      whenCreated={(map) => {
+        window.leafletMapInstance = map;
           mapRef.current = map;
-        }}
-      >
+      }}
+    >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
