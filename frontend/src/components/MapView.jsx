@@ -249,7 +249,7 @@ export default function MapView() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [startInput, setStartInput] = useState("");
   const [endInput, setEndInput] = useState("");
-  const [clickAssignTarget, setClickAssignTarget] = useState(null); // 'start' | 'end' | null
+  const [clickAssignTarget, setClickAssignTarget] = useState(null); 
 
   const API_BASE = useMemo(() =>
     import.meta.env.VITE_DATA_BASE_URL?.replace('/data', '') ||  "http://localhost:5000"  || "https://mapify-it-task.onrender.com",
@@ -426,13 +426,12 @@ export default function MapView() {
         console.log('[Reverse] data', data);
         handleReverseResult([lat, lng], data);
 
-        // If user chose to assign pin to start/end, populate the fields
         if (clickAssignTarget === 'start') {
           setStartInput(`${lat.toFixed(6)},${lng.toFixed(6)}`);
-          setClickAssignTarget('end'); // auto-switch to end for next click
+          setClickAssignTarget('end');  
         } else if (clickAssignTarget === 'end') {
           setEndInput(`${lat.toFixed(6)},${lng.toFixed(6)}`);
-          setClickAssignTarget(null); // done assigning
+          setClickAssignTarget(null); 
         }
       } else {
         console.warn('[Reverse] failed status', response.status);
@@ -444,7 +443,6 @@ export default function MapView() {
     }
   }, [API_BASE, handleReverseResult, clickAssignTarget]);
 
-  // Parse "lat,lng" string
   const parseLatLng = (value) => {
     if (!value) return null;
     const parts = value.split(",").map((p) => parseFloat(p.trim()));
@@ -452,7 +450,6 @@ export default function MapView() {
     return parts;
   };
 
-  // Fetch route from backend
   const fetchRoute = useCallback(async (startStr, endStr) => {
     const start = parseLatLng(startStr);
     const end = parseLatLng(endStr);
@@ -490,8 +487,7 @@ export default function MapView() {
       };
       setRouteGeo({ type: "FeatureCollection", features: [feature] });
 
-      // Fly to start/end midpoint
-      const midLat = (start[0] + end[0]) / 2;
+       const midLat = (start[0] + end[0]) / 2;
       const midLng = (start[1] + end[1]) / 2;
       flyTo([midLat, midLng], 13, 1.2);
     } catch (error) {
@@ -546,36 +542,31 @@ export default function MapView() {
 
     return L.divIcon({
       className: "custom-poi-icon",
-      // very small dot, no border/shadow
-      html: `<div style="background-color: ${color}; width: 8px; height: 8px; border-radius: 50%;"></div>`,
+       html: `<div style="background-color: ${color}; width: 8px; height: 8px; border-radius: 50%;"></div>`,
       iconSize: [6, 6],
       iconAnchor: [3, 3],
     });
   }, []);
 
-  // Style for health buffers
   const healthBufferStyle = useCallback(() => ({
-    color: "#0B3D2E",      // dark green outline
+    color: "#0B3D2E",      
     fillColor: "#0B3D2E",
     fillOpacity: 0.18,
     weight: 1,
     dashArray: "3,3"
   }), []);
 
-  // Style for route line
   const routeStyle = useCallback(() => ({
-    color: "#0ea5e9", // sky-500
+    color: "#0ea5e9", 
     weight: 5,
     opacity: 0.9
   }), []);
   
-  // Memoize highlight circles to avoid recreating on every render
   const highlightCircles = useMemo(() => {
     if (!selectedLocation) return null;
     
     return (
       <>
-        {/* Highlight Circle - larger area indicator */}
         <Circle
           interactive={false}
           center={selectedLocation.coords}
@@ -702,7 +693,6 @@ export default function MapView() {
         </div>
       )}
 
-      {/* Routing panel */}
       <div
         style={{
           position: "absolute",
